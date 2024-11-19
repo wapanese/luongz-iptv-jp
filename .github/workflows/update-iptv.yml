@@ -1,0 +1,68 @@
+name: Update IPTV List
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  update-iptv:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download current file
+        run: |
+          curl -o jp.m3u https://raw.githubusercontent.com/luongz/iptv-jp/main/jp.m3u
+
+      - name: Process file
+        run: |
+          temp_file=$(mktemp)
+          
+          mapfile -t lines < jp.m3u
+          
+          to_move=()
+          processed_indices=()
+          
+          for i in "${!lines[@]}"; do
+              if [[ "${lines[$i]}" == *"google.com"* ]]; then
+                  if [ $i -gt 0 ] && [[ "${lines[$((i-1))]}" == "#"* ]]; then
+                      to_move+=("${lines[$((i-1))]}")
+                      to_move+=("${lines[$i]}")
+                      processed_indices+=($((i-1)) $i)
+                  else
+                      to_move+=("${lines[$i]}")
+                      processed_indices+=($i)
+                  fi
+              fi
+          done
+          
+          {
+              for i in "${!lines[@]}"; do
+                  if [[ ! " ${processed_indices[@]} " =~ " ${i} " ]]; then
+                      echo "${lines[$i]}"
+                  fi
+              done
+              
+              for line in "${to_move[@]}"; do
+                  echo "$line"
+              done
+          } > "$temp_file"
+          
+          mv "$temp_file" jp.m3u
+
+      - name: Check for changes
+        id: changes
+        run: |
+          git diff --exit-code jp.m3u || echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push if changed
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add jp.m3u
+          git commit -m "Update IPTV list"
+          git push
